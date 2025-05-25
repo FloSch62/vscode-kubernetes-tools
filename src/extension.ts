@@ -2,26 +2,29 @@ import * as vscode from 'vscode';
 import { loadKubeconfig, getKubeconfigPath } from './components/kubectl/kubeconfig';
 import * as k8s from '@kubernetes/client-node';
 
+const output = vscode.window.createOutputChannel('Minimal K8s');
+
 export function activate(context: vscode.ExtensionContext) {
-    console.log('=== MINIMAL K8S EXTENSION ACTIVATED ===');
+    output.appendLine('=== MINIMAL K8S EXTENSION ACTIVATED ===');
     
     let disposable = vscode.commands.registerCommand('minimal-k8s.listNamespaces', async () => {
-        console.log('\n=== STARTING NAMESPACE LIST OPERATION ===');
-        console.log(`Time: ${new Date().toISOString()}`);
+        output.show(true);
+        output.appendLine('\n=== STARTING NAMESPACE LIST OPERATION ===');
+        output.appendLine(`Time: ${new Date().toISOString()}`);
         
         try {
             // Step 1: Get kubeconfig path
-            console.log('\n--- STEP 1: Getting kubeconfig path ---');
-            const kubeconfigPath = getKubeconfigPath();
-            console.log('Kubeconfig path result:', JSON.stringify(kubeconfigPath, null, 2));
+            output.appendLine('\n--- STEP 1: Getting kubeconfig path ---');
+            const kubeconfigPath = getKubeconfigPath(output);
+            output.appendLine(`Kubeconfig path result: ${JSON.stringify(kubeconfigPath, null, 2)}`);
             
             // Step 2: Load kubeconfig
-            console.log('\n--- STEP 2: Loading kubeconfig ---');
-            const kubeconfig = await loadKubeconfig();
-            console.log('Kubeconfig loaded successfully');
-            console.log('Current context:', kubeconfig.getCurrentContext());
-            console.log('Current cluster:', kubeconfig.getCurrentCluster());
-            console.log('Current user:', kubeconfig.getCurrentUser());
+            output.appendLine('\n--- STEP 2: Loading kubeconfig ---');
+            const kubeconfig = await loadKubeconfig(output);
+            output.appendLine('Kubeconfig loaded successfully');
+            output.appendLine(`Current context: ${kubeconfig.getCurrentContext()}`);
+            output.appendLine(`Current cluster: ${JSON.stringify(kubeconfig.getCurrentCluster())}`);
+            output.appendLine(`Current user: ${JSON.stringify(kubeconfig.getCurrentUser())}`);
             
             // Log the raw config (without sensitive data)
             const rawConfig = kubeconfig.exportConfig();
@@ -47,64 +50,64 @@ export function activate(context: vscode.ExtensionContext) {
                 });
             }
             
-            console.log('\nSanitized kubeconfig:', JSON.stringify(sanitizedConfig, null, 2));
+            output.appendLine(`\nSanitized kubeconfig: ${JSON.stringify(sanitizedConfig, null, 2)}`);
             
             // Step 3: Create API client
-            console.log('\n--- STEP 3: Creating K8s API client ---');
+            output.appendLine('\n--- STEP 3: Creating K8s API client ---');
             const k8sApi = kubeconfig.makeApiClient(k8s.CoreV1Api);
-            console.log('K8s API client created');
+            output.appendLine('K8s API client created');
             
             // Log the request configuration
             const cluster = kubeconfig.getCurrentCluster();
-            console.log('\n--- API Request Configuration ---');
-            console.log('Server URL:', cluster?.server);
-            console.log('Skip TLS Verify:', cluster?.skipTLSVerify);
-            console.log('Current User:', kubeconfig.getCurrentUser()?.name);
+            output.appendLine('\n--- API Request Configuration ---');
+            output.appendLine(`Server URL: ${cluster?.server}`);
+            output.appendLine(`Skip TLS Verify: ${cluster?.skipTLSVerify}`);
+            output.appendLine(`Current User: ${kubeconfig.getCurrentUser()?.name}`);
             
             // Step 4: Make API call to list namespaces
-            console.log('\n--- STEP 4: Making API call to list namespaces ---');
-            console.log('API Endpoint: GET /api/v1/namespaces');
+            output.appendLine('\n--- STEP 4: Making API call to list namespaces ---');
+            output.appendLine('API Endpoint: GET /api/v1/namespaces');
             
             const startTime = Date.now();
             const response = await k8sApi.listNamespace();
             const endTime = Date.now();
             
-            console.log(`API call completed in ${endTime - startTime}ms`);
-            console.log('Response status:', response.response.statusCode);
-            console.log('Response headers:', response.response.headers);
+            output.appendLine(`API call completed in ${endTime - startTime}ms`);
+            output.appendLine(`Response status: ${response.response.statusCode}`);
+            output.appendLine(`Response headers: ${JSON.stringify(response.response.headers)}`);
             
             const namespaces = response.body.items;
             
-            console.log(`\n--- RESULTS: Found ${namespaces.length} namespaces ---`);
+            output.appendLine(`\n--- RESULTS: Found ${namespaces.length} namespaces ---`);
             namespaces.forEach((ns: k8s.V1Namespace, index: number) => {
-                console.log(`\n${index + 1}. Namespace: ${ns.metadata?.name}`);
-                console.log(`   UID: ${ns.metadata?.uid}`);
-                console.log(`   Created: ${ns.metadata?.creationTimestamp}`);
-                console.log(`   Status: ${ns.status?.phase}`);
-                console.log(`   Labels: ${JSON.stringify(ns.metadata?.labels || {})}`);
-                console.log(`   Annotations: ${JSON.stringify(ns.metadata?.annotations || {})}`);
+                output.appendLine(`\n${index + 1}. Namespace: ${ns.metadata?.name}`);
+                output.appendLine(`   UID: ${ns.metadata?.uid}`);
+                output.appendLine(`   Created: ${ns.metadata?.creationTimestamp}`);
+                output.appendLine(`   Status: ${ns.status?.phase}`);
+                output.appendLine(`   Labels: ${JSON.stringify(ns.metadata?.labels || {})}`);
+                output.appendLine(`   Annotations: ${JSON.stringify(ns.metadata?.annotations || {})}`);
             });
             
             // Determine active namespace
             const currentContext = kubeconfig.getContextObject(kubeconfig.getCurrentContext() || '');
             const activeNamespace = currentContext?.namespace || 'default';
-            console.log(`\nActive namespace: ${activeNamespace}`);
+            output.appendLine(`\nActive namespace: ${activeNamespace}`);
             
-            vscode.window.showInformationMessage(`Found ${namespaces.length} namespaces. Check the console (Help > Toggle Developer Tools) for details.`);
+            vscode.window.showInformationMessage(`Found ${namespaces.length} namespaces. Check the 'Minimal K8s' output channel for details.`);
             
         } catch (error: any) {
-            console.error('\n=== ERROR OCCURRED ===');
-            console.error('Error type:', error.constructor.name);
-            console.error('Error message:', error.message);
-            console.error('Error stack:', error.stack);
+            output.appendLine('\n=== ERROR OCCURRED ===');
+            output.appendLine(`Error type: ${error.constructor.name}`);
+            output.appendLine(`Error message: ${error.message}`);
+            output.appendLine(`Error stack: ${error.stack}`);
             
             if (error.response) {
-                console.error('Response status:', error.response.statusCode);
-                console.error('Response headers:', error.response.headers);
-                console.error('Response body:', error.body || error.response.body);
+                output.appendLine(`Response status: ${error.response.statusCode}`);
+                output.appendLine(`Response headers: ${JSON.stringify(error.response.headers)}`);
+                output.appendLine(`Response body: ${error.body || error.response.body}`);
             }
             
-            vscode.window.showErrorMessage(`Failed to list namespaces: ${error.message}`);
+            vscode.window.showErrorMessage(`Failed to list namespaces: ${error.message}. See the 'Minimal K8s' output channel for details.`);
         }
     });
     
