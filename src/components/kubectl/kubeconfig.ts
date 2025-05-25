@@ -1,22 +1,6 @@
 import * as vscode from 'vscode';
-import { fs } from '../../fs';
 import * as path from 'path';
-import * as yaml from 'js-yaml';
 import * as shelljs from 'shelljs';
-import { refreshExplorer } from '../clusterprovider/common/explorer';
-import { getActiveKubeconfig, getUseWsl } from '../config/config';
-import { mkdirp } from 'mkdirp';
-
-interface Named {
-    readonly name: string;
-}
-
-interface Config {
-    clusters?: Named[];
-    contexts?: Named[];
-    users?: Named[];
-    "current-context"?: string;
-}
 
 export interface HostKubeconfigPath {
     readonly pathType: 'host';
@@ -56,13 +40,16 @@ export async function loadKubeconfig(): Promise<any> {
 }
 
 export function getKubeconfigPath(): KubeconfigPath {
-    // If the user specified a kubeconfig path -WSL or not-, let's use it.
-    let kubeconfigPath: string | undefined = getActiveKubeconfig();
+    // Check if the user has configured to use WSL
+    const useWsl = vscode.workspace.getConfiguration().get<boolean>("vs-kubernetes.use-wsl", false);
+    
+    // Check if user has specified a kubeconfig path
+    let kubeconfigPath: string | undefined = vscode.workspace.getConfiguration().get<string>("vs-kubernetes.kubeconfig");
 
-    if (getUseWsl()) {
+    if (useWsl) {
         if (!kubeconfigPath) {
             // User is using WSL: we want to use the same default that kubectl uses on Linux ($KUBECONFIG or home directory).
-            const result = shelljs.exec('wsl.exe sh -c "${KUBECONFIG:-$HOME/.kube/config}"', { silent: true }) as shelljs.ExecOutputReturnValue;
+            const result = shelljs.exec('wsl.exe sh -c "echo ${KUBECONFIG:-$HOME/.kube/config}"', { silent: true }) as shelljs.ExecOutputReturnValue;
             if (!result) {
                 throw new Error(`Impossible to retrieve the kubeconfig path from WSL. No result from the shelljs.exe call.`);
             }
@@ -89,64 +76,4 @@ export function getKubeconfigPath(): KubeconfigPath {
         pathType: 'host',
         hostPath: kubeconfigPath
     };
-}
-
-export async function mergeToKubeconfig(newConfigText: string): Promise<void> {
-    const kubeconfigPath = getKubeconfigPath();
-
-    if (kubeconfigPath.pathType === 'wsl') {
-        vscode.window.showErrorMessage("You are on Windows, but are using WSL-based tools. We can't merge into your WSL kubeconfig. Consider running VS Code in WSL using the Remote Extensions.");
-        return;
-    }
-
-    const kcfile = kubeconfigPath.hostPath;
-    const kcfileExists = await fs.existsAsync(kcfile);
-
-    const kubeconfigText = kcfileExists ? await fs.readTextFile(kcfile) : '';
-    const kubeconfig = (yaml.load(kubeconfigText) || {}) as Config;
-    const newConfig = yaml.load(newConfigText) as Config;
-
-    for (const section of ['clusters', 'contexts', 'users'] as (keyof Omit<Config, "current-context">)[]) {
-        const existing: Named[] | undefined = kubeconfig[section];
-        const toMerge: Named[] | undefined = newConfig[section];
-        if (!toMerge) {
-            continue;
-        }
-        if (!existing) {
-            kubeconfig[section] = toMerge;
-            continue;
-        }
-        await mergeInto(existing, toMerge);
-    }
-
-    if (!kcfileExists && newConfig.contexts && newConfig.contexts[0]) {
-        kubeconfig['current-context'] = newConfig.contexts[0].name;
-    }
-
-    const merged = yaml.dump(kubeconfig, { lineWidth: 1000000, noArrayIndent: true });
-
-    if (kcfileExists) {
-        const backupFile = kcfile + '.vscode-k8s-tools-backup';
-        if (await fs.existsAsync(backupFile)) {
-            await fs.unlinkAsync(backupFile);
-        }
-        await fs.renameAsync(kcfile, backupFile);
-    } else {
-        await mkdirp(path.dirname(kcfile));
-    }
-    await fs.writeTextFile(kcfile, merged);
-
-    await refreshExplorer();
-    await vscode.window.showInformationMessage(`New configuration merged to ${kcfile}`);
-}
-
-async function mergeInto(existing: Named[], toMerge: Named[]): Promise<void> {
-    for (const toMergeEntry of toMerge) {
-        if (existing.some((e) => e.name === toMergeEntry.name)) {
-            // we have CONFLICT and CONFLICT BUILDS CHARACTER
-            await vscode.window.showWarningMessage(`${toMergeEntry.name} already exists - skipping`);
-            continue;  // TODO: build character
-        }
-        existing.push(toMergeEntry);
-    }
 }
